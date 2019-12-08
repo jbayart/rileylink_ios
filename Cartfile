@@ -1,2 +1,2 @@
-github "LoopKit/LoopKit" ~> 3.0
+github "jbayart/LoopKit" "mitchellhenke-rsilvers-fpu"
 github "LoopKit/MKRingProgressView" "appex-safe"
