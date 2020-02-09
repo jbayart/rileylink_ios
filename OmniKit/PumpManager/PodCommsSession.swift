@@ -477,12 +477,21 @@ public class PodCommsSession {
         }
     }
     
+    // cancelDelivery() implements a smart interface to the Pod's cancel delivery command
     public func cancelDelivery(deliveryType: CancelDeliveryCommand.DeliveryType, beepType: BeepType) -> CancelDeliveryResult {
+        var message: [MessageBlock]
 
-        let cancelDelivery = CancelDeliveryCommand(nonce: podState.currentNonce, deliveryType: deliveryType, beepType: beepType)
-
+        // Special case handling for a non-silent cancel all which would normally emit 3 sets of beeps!
+        if beepType != .noBeep && deliveryType == .all {
+            // For this case use two cancel commands in a one message with the 1st command silently cancelling all but the basal
+            // and the 2nd command cancelling only the basal with the specified beepType so there will only be a single beep sequence.
+            message = [CancelDeliveryCommand(nonce: podState.currentNonce, deliveryType: .allButBasal, beepType: .noBeep),
+                       CancelDeliveryCommand(nonce: podState.currentNonce, deliveryType: .basal, beepType: beepType)]
+        } else {
+            message = [CancelDeliveryCommand(nonce: podState.currentNonce, deliveryType: deliveryType, beepType: beepType)]
+        }
         do {
-            let status: StatusResponse = try send([cancelDelivery])
+            let status: StatusResponse = try send(message)
             let now = Date()
             if deliveryType.contains(.basal) {
                 podState.unfinalizedSuspend = UnfinalizedDose(suspendStartTime: now, scheduledCertainty: .certain)
@@ -601,18 +610,20 @@ public class PodCommsSession {
         return statusResponse
     }
 
-    public func readFlashLogsRequest(podInfoResponseSubType: PodInfoResponseSubType) throws {
+    @discardableResult
+    public func readPulseLogsRequest(podInfoResponseSubType: PodInfoResponseSubType) throws -> PodInfoResponse {
         let blocksToSend = [GetStatusCommand(podInfoType: podInfoResponseSubType)]
         let message = Message(address: podState.address, messageBlocks: blocksToSend, sequenceNum: transport.messageNumber)
         let messageResponse = try transport.sendMessage(message)
 
         if let podInfoResponseMessageBlock = messageResponse.messageBlocks[0] as? PodInfoResponse {
-            log.default("Pod flash log: %@", String(describing: podInfoResponseMessageBlock))
+            log.default("Pod pulse log: %@", String(describing: podInfoResponseMessageBlock))
+            return podInfoResponseMessageBlock
         } else if let fault = messageResponse.fault {
             handlePodFault(fault: fault)
             throw PodCommsError.podFault(fault: fault)
         } else {
-            log.error("Unexpected Pod flash log response: %@", String(describing: messageResponse.messageBlocks[0]))
+            log.error("Unexpected Pod pulse log response: %@", String(describing: messageResponse.messageBlocks[0]))
             throw PodCommsError.unexpectedResponse(response: messageResponse.messageBlocks[0].blockType)
         }
     }
